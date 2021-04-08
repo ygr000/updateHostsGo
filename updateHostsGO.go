@@ -6,16 +6,19 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
+	_"go/types"
 	"log"
 	"net"
 	"os"
+	"reflect"
+	_"reflect"
 	"strings"
 	"sync"
 	"time"
 )
 
 var (
-	netName string   = "api.warframe.com"
+	netName string = "api.warframe.com"
 	/*	ipArr   []string = []string{"184.51.176.169", "23.74.133.167", "104.95.79.154", "104.126.22.203",
 		"23.79.190.230", "23.12.224.185", "104.86.4.131", "23.33.36.79",
 		"104.76.1.18", "23.198.102.81", "23.41.68.161", "96.16.180.231",
@@ -23,7 +26,9 @@ var (
 		"23.39.78.6", "96.17.217.36", "2.21.127.142", "23.194.74.82",
 		"104.89.9.82", "23.66.16.169", "104.87.134.99", "104.74.221.247",
 		"23.5.242.238", "23.4.113.204", "184.30.212.47", "23.76.83.250", "23.51.129.181"}*/
-	ipArr   []string = []string{"72.247.104.185","104.103.116.152","104.117.201.77","23.72.65.27","104.99.90.187","23.33.36.79","184.51.176.169","104.127.215.220","104.126.22.203","96.17.43.31","104.94.227.206","96.16.180.231","104.121.93.36","23.208.32.39","104.103.226.202","23.74.133.167","23.211.165.59","23.41.68.161","96.16.137.94","96.16.225.173","104.86.4.131"}
+	ipArr     []string = []string{"72.247.104.185", "104.103.116.152", "104.117.201.77", "23.72.65.27", "104.99.90.187", "23.33.36.79", "184.51.176.169", "104.127.215.220", "104.126.22.203", "96.17.43.31", "104.94.227.206", "96.16.180.231", "104.121.93.36", "23.208.32.39", "104.103.226.202", "23.74.133.167", "23.211.165.59", "23.41.68.161", "96.16.137.94", "96.16.225.173", "104.86.4.131"}
+	pingTimes int      = 5
+	maxTime   int64    = 9999
 )
 
 type ICMP struct {
@@ -77,13 +82,15 @@ func getPingTimes(ip string, resultChan chan Result, wg *sync.WaitGroup) {
 		fmt.Println(err)
 		return
 	}
-	for i := 0; i < 4; i++ {
-		icmp := getICMP(0)
+	var realTimes = 0
+	for   i := uint16(0); int(i) < pingTimes; i++ {
+		icmp := getICMP(i)
+		err = nil
 		var buffer bytes.Buffer
 		binary.Write(&buffer, binary.BigEndian, icmp)
 		if _, err := conn.Write(buffer.Bytes()); err != nil {
 			fmt.Println(err)
-			return
+			continue
 		}
 		//	buffer.Reset();
 		tStart := time.Now()
@@ -92,23 +99,33 @@ func getPingTimes(ip string, resultChan chan Result, wg *sync.WaitGroup) {
 
 		if err != nil {
 			fmt.Println(err)
-			return
+			continue
 		}
 		tEnd := time.Now()
 		//duration := tEnd.Sub(tStart).Nanoseconds() / 1e6
 		duration := tEnd.Sub(tStart).Milliseconds()
 		sumTime += duration
+		realTimes++
 		fmt.Printf("%d bytes from %s: seq=%d time=%d\n", receiveCnt, ip, icmp.SequenceNum, duration)
 	}
-	avgTime = sumTime / 4
+	if realTimes == 0 {
+		avgTime = maxTime
+	} else {
+		avgTime = sumTime / int64(realTimes)
+	}
+	if avgTime == maxTime {
+		sumTime = maxTime
+	}
 	result := Result{
-		ip:      ip,
-		avgTime: avgTime,
-		sumTime: sumTime,
+		ip:       ip,
+		avgTime:  avgTime,
+		sumTime:  sumTime,
+		loseRate: fmt.Sprintf("%.2f  ",float32(pingTimes - realTimes) / float32(pingTimes)),
 	}
 	resultChan <- result
 	//return avgTime,sumTime
 }
+
 func chan2Slice(boolchan chan bool) {
 	for v := range resultChan {
 		resultArr = append(resultArr, v)
@@ -117,9 +134,10 @@ func chan2Slice(boolchan chan bool) {
 }
 
 type Result struct {
-	ip      string
-	avgTime int64
-	sumTime int64
+	ip       string
+	avgTime  int64
+	sumTime  int64
+	loseRate string
 }
 
 func getMinResult(resultArr []Result) (int, Result) {
@@ -143,8 +161,8 @@ func getMinResult(resultArr []Result) (int, Result) {
 var resultArr = make([]Result, 0, len(ipArr))
 var resultChan chan Result
 
-func write2File(result Result, f float64,filePathPointer *string) {
-	var data string=""
+func write2File(result Result, f float64, filePathPointer *string) {
+	var data string = ""
 	file, err := os.OpenFile(*filePathPointer, os.O_RDWR, 0777)
 	if err != nil {
 		log.Fatalln("errat write2file:", err)
@@ -165,13 +183,13 @@ func write2File(result Result, f float64,filePathPointer *string) {
 		return
 	}
 	data = fmt.Sprintf("%s%s  %s #写入时间 %s 延迟 %d ms 运行时间 %f s", data, result.ip, netName, time.Now().String(), result.avgTime, f)
-	err=file.Truncate(0)
+	err = file.Truncate(0)
 	if err != nil {
 		log.Fatalln("errat write2file:", err)
 		return
 	}
 	//重置游标,truncate不会重置游标位置
-	_,err=file.Seek(0,0)
+	_, err = file.Seek(0, 0)
 	if err != nil {
 		log.Fatalln("errat write2file:", err)
 		return
@@ -181,6 +199,31 @@ func write2File(result Result, f float64,filePathPointer *string) {
 		log.Fatalln("errat write2file:", err)
 		return
 	}
+}
+func toString(a interface{}) string{
+	var str string="{";
+	if reflect.TypeOf(a).Kind()==reflect.Struct{
+		for i:=0;i<reflect.ValueOf(a).NumField();i++{
+			if reflect.ValueOf(a).Field(i).Kind()==reflect.Int64{
+				key:=reflect.TypeOf(a).Field(i).Name
+
+				data:=reflect.ValueOf(a).Field(i).Int()
+
+				str=fmt.Sprintf("%s %s:%d ,",str,key,data)
+
+			}else{
+				key:=reflect.TypeOf(a).Field(i).Name
+
+
+				data:=reflect.ValueOf(a).Field(i).String()
+
+				str=fmt.Sprintf("%s %s:%s ,",str,key,data)
+			}
+		}
+		str=strings.TrimRight(str,",")
+		str=str+"}"
+	}
+	return str
 }
 func main() {
 	filePathPointer := flag.String("filepath", "C:\\Windows\\System32\\drivers\\etc\\hosts", "desc a filepath")
@@ -200,12 +243,12 @@ func main() {
 		close(resultChan)
 		<-done
 		_, resutl := getMinResult(resultArr)
-		fmt.Println(resutl)
+		fmt.Println(toString(resutl))
 		fmt.Println(resultArr)
 		end := time.Now()
 		ms := (end.Sub(start).Milliseconds())
 		s := (end.Sub(start).Seconds())
-		write2File(resutl, s,filePathPointer)
+		write2File(resutl, s, filePathPointer)
 		fmt.Printf("总共耗时 %d ms (%f s) \n", ms, s)
 
 		time.Sleep(time.Second * 40)
