@@ -6,12 +6,12 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
-	_"go/types"
+	_ "go/types"
 	"log"
 	"net"
 	"os"
 	"reflect"
-	_"reflect"
+	_ "reflect"
 	"strings"
 	"sync"
 	"time"
@@ -83,7 +83,7 @@ func getPingTimes(ip string, resultChan chan Result, wg *sync.WaitGroup) {
 		return
 	}
 	var realTimes = 0
-	for   i := uint16(0); int(i) < pingTimes; i++ {
+	for i := uint16(0); int(i) < pingTimes; i++ {
 		icmp := getICMP(i)
 		err = nil
 		var buffer bytes.Buffer
@@ -120,7 +120,7 @@ func getPingTimes(ip string, resultChan chan Result, wg *sync.WaitGroup) {
 		ip:       ip,
 		avgTime:  avgTime,
 		sumTime:  sumTime,
-		loseRate: fmt.Sprintf("%.2f  ",float32(pingTimes - realTimes) / float32(pingTimes)),
+		loseRate: fmt.Sprintf("%.2f  ", float32(pingTimes-realTimes)/float32(pingTimes)),
 	}
 	resultChan <- result
 	//return avgTime,sumTime
@@ -158,7 +158,7 @@ func getMinResult(resultArr []Result) (int, Result) {
 	return index, result
 }
 
-var resultArr = make([]Result, 0, len(ipArr))
+var resultArr []Result
 var resultChan chan Result
 
 func write2File(result Result, f float64, filePathPointer *string) {
@@ -182,7 +182,7 @@ func write2File(result Result, f float64, filePathPointer *string) {
 		log.Fatalln("errat write2file:", err)
 		return
 	}
-	data = fmt.Sprintf("%s%s  %s #写入时间 %s 延迟 %d ms 运行时间 %f s", data, result.ip, netName, time.Now().String(), result.avgTime, f)
+	data = fmt.Sprintf("%s%s  %s #写入时间 %s 延迟 %d ms 丢包率 %s 运行时间 %f s", data, result.ip, netName, time.Now().String(), result.avgTime, result.loseRate, f)
 	err = file.Truncate(0)
 	if err != nil {
 		log.Fatalln("errat write2file:", err)
@@ -194,34 +194,33 @@ func write2File(result Result, f float64, filePathPointer *string) {
 		log.Fatalln("errat write2file:", err)
 		return
 	}
-	file.Write([]byte(data))
+	_, err = file.WriteString(data)
 	if err != nil {
 		log.Fatalln("errat write2file:", err)
 		return
 	}
 }
-func toString(a interface{}) string{
-	var str string="{";
-	if reflect.TypeOf(a).Kind()==reflect.Struct{
-		for i:=0;i<reflect.ValueOf(a).NumField();i++{
-			if reflect.ValueOf(a).Field(i).Kind()==reflect.Int64{
-				key:=reflect.TypeOf(a).Field(i).Name
+func toString(a interface{}) string {
+	var str string = "{"
+	if reflect.TypeOf(a).Kind() == reflect.Struct {
+		for i := 0; i < reflect.ValueOf(a).NumField(); i++ {
+			if reflect.ValueOf(a).Field(i).Kind() == reflect.Int64 {
+				key := reflect.TypeOf(a).Field(i).Name
 
-				data:=reflect.ValueOf(a).Field(i).Int()
+				data := reflect.ValueOf(a).Field(i).Int()
 
-				str=fmt.Sprintf("%s %s:%d ,",str,key,data)
+				str = fmt.Sprintf("%s %s:%d ,", str, key, data)
 
-			}else{
-				key:=reflect.TypeOf(a).Field(i).Name
+			} else {
+				key := reflect.TypeOf(a).Field(i).Name
 
+				data := reflect.ValueOf(a).Field(i).String()
 
-				data:=reflect.ValueOf(a).Field(i).String()
-
-				str=fmt.Sprintf("%s %s:%s ,",str,key,data)
+				str = fmt.Sprintf("%s %s:%s ,", str, key, data)
 			}
 		}
-		str=strings.TrimRight(str,",")
-		str=str+"}"
+		str = strings.TrimRight(str, ",")
+		str = str + "}"
 	}
 	return str
 }
@@ -233,6 +232,7 @@ func main() {
 		start := time.Now()
 		var wg sync.WaitGroup
 		done := make(chan bool)
+		resultArr = make([]Result, 0, len(ipArr))
 		resultChan = make(chan Result, len(ipArr))
 		for _, v := range ipArr {
 			wg.Add(1)
@@ -248,8 +248,9 @@ func main() {
 		end := time.Now()
 		ms := (end.Sub(start).Milliseconds())
 		s := (end.Sub(start).Seconds())
+		fmt.Printf("%d 个ip , 产生%d 个结果 总共耗时 %d ms (%f s)   \n", len(ipArr), len(resultArr),
+			ms, s)
 		write2File(resutl, s, filePathPointer)
-		fmt.Printf("总共耗时 %d ms (%f s) \n", ms, s)
 
 		time.Sleep(time.Second * 40)
 	}
